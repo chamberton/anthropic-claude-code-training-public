@@ -1,29 +1,55 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Northwind Payments — Merchant Console
 
-The internal tool support and ops staff use to look up a payment, refund it, work the dispute queue, and issue virtual cards.
+Internal ops tool for looking up payments, refunding them, working the dispute queue, and issuing virtual cards. All merchants, cardholders, amounts, and card numbers are generated — nothing here resembles real payment data.
 
-Northwind Payments is fictional. Every merchant, cardholder, amount, and card in this app is generated.
-
-## Run it
+## Commands
 
 ```bash
-npm install
-npm run dev
+npm run dev        # start dev server (localhost:3000)
+npm run build      # production build
+npm run lint       # ESLint via next lint
+npm test           # run all tests once (vitest run)
+npm run test:watch # vitest in watch mode
+
+# run a single test file
+npx vitest run src/lib/csv.test.ts
 ```
 
-No database, no seed step, no Docker.
+Tests live beside the source file they cover (`csv.ts` → `csv.test.ts`). Extend those files rather than creating new ones.
 
-## Data lives in memory
+## Data and store
 
-Seed data is JSON, loaded into a store module at boot. Route handlers read and write that store.
+No database. Seed data is generated at boot and held on `globalThis` so Next.js module reloads don't reset it. Writes survive for the process lifetime and vanish on restart — that is deliberate.
 
-- Writes last for the life of the dev server and vanish on restart. That is expected.
-- Persistence is tracked separately as NWP-203. **Do not add a database, an ORM, or migrations.**
-- If you need more seed data, add it to the JSON. Never edit seed data to make a failing case disappear.
+## Conventions that cause bugs when missed
 
-## Where the rest of the context lives
+1. **Money is integer minor units.** `$250.00` is `25000`. Format exactly once, at the render boundary, using `formatMoney()` in `src/lib/money.ts`. Never store or compare a float; never call `toFixed` on a value that will be stored or summed.
 
-This file loads every session, so it stays short. Detail that only matters once you open a particular kind of file lives in `.claude/rules/` and loads when you do:
+2. **One query builder.** All payment filtering goes through `filterPayments` / `sortPayments` / `paginate` in `src/data/queries.ts`. A second filter path is a defect, not a shortcut — including for export routes and new scopes.
+
+3. **Validate on the server.** Column names, statuses, sort fields, currencies — anything arriving from a client is checked against an allowlist in `parseFilters()` or a local allowlist before it reaches the store, a query, or a filename. Client-side checks are a convenience only.
+
+4. **Storage and bucketing are UTC.** Display converts to the merchant's IANA timezone (via `formatDate()` in `src/lib/dates.ts`). Nothing else does timezone conversion.
+
+## Path alias
+
+`@/` resolves to `src/`. All imports use this alias.
+
+## Component rules
+
+`src/components/` has Button, Input, Select, Dialog, Table, Badge, and more — built on Tremor and Radix. Use these before adding a dependency or hand-rolling a control. Tailwind only; no inline `style` attributes. Prettier with `prettier-plugin-tailwindcss` sorts class names — run `npm run lint` to catch order issues.
+
+## Card rules
+
+Generated card numbers use the `4242` test BIN with a valid Luhn check digit. The full PAN is returned exactly once (creation response); after that, last four only. Card status is a state machine: `active ⇄ frozen`, either → `cancelled` (terminal).
+
+## Context layering
+
+Detail that only matters for a specific file type lives in `.claude/rules/` and is loaded by Claude Code when you open that kind of file:
 
 | Rule | Applies to |
 | --- | --- |
@@ -32,31 +58,12 @@ This file loads every session, so it stays short. Detail that only matters once 
 | `cards.md` | anything card-related |
 | `components.md` | `src/components/`, `src/app/` |
 
-## Conventions
+## Release Standards
 
-These four explain most of the code, and breaking them is how bugs get in here.
+- All changes require test evidence before merging — `npm test` must pass and any new behaviour must have a test covering it.
+- No direct commits to `main`. All work goes through a branch and a pull request.
+- Every PR description must include a one-line business impact summary stating what ops or merchants can now do (or what risk is reduced).
 
-1. **Money is integer minor units.** `$250.00` is `25000`. No floats, no strings with currency symbols. Format once, at the edge, next to its currency code.
-2. **Storage and bucketing are UTC.** Display converts to the merchant's timezone. Nothing else does.
-3. **One query builder.** Payment filtering goes through the builder behind `GET /api/payments`. A second implementation is a bug, not a shortcut.
-4. **Validate on the server.** Anything from the client — column names, currencies, limits, statuses — is checked against an allowlist before it reaches a query, a filename, or the store.
+## Before pushing
 
-## Card rules
-
-- Generated numbers use the `4242` test BIN and a valid Luhn check digit. Nothing here may resemble a real PAN.
-- The full number is returned exactly once, in the creation response. After that, last four only.
-- Status is a state machine: `active ⇄ frozen`, either to `cancelled`, and `cancelled` is terminal.
-
-## Layout
-
-| Path | What lives there |
-| --- | --- |
-| `src/app/` | Console routes: overview, payments, disputes, payouts. Cards is NWP-201 and does not exist yet |
-| `src/app/api/` | Route handlers |
-| `src/data/` | Seed JSON, the in-memory store, and types |
-| `src/components/` | Tremor-based primitives and the console's own components |
-| `src/lib/` | Money, date, and CSV helpers, each with a `.test.ts` beside it. Read these before touching an amount |
-
-## Before you push
-
-Run `npm test`, then `/ship-ready`. The skill checks the rules above, not just formatting.
+Run `npm test` and verify all tests pass. The export column serializer in `src/lib/csv.ts` has tests in `src/lib/csv.test.ts` that must stay green.

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { Payment } from "@/data/types"
-import { EXPORT_COLUMNS, exportFilename, toCsv } from "./csv"
+import {
+  DEFAULT_EXPORT_COLUMNS,
+  EXPORT_COLUMNS,
+  exportFilename,
+  parseExportColumns,
+  toCsv,
+} from "./csv"
 
 /**
  * The export is the file ops hands to a merchant, so a broken cell is a
@@ -76,10 +82,43 @@ describe("toCsv", () => {
   })
 })
 
+describe("parseExportColumns", () => {
+  it("keeps a subset of columns in the order requested", () => {
+    const columns = parseExportColumns("amount,id,currency")
+    expect(columns).toEqual(["amount", "id", "currency"])
+    expect(toCsv([payment], columns)).toBe(
+      ["amount,id,currency", "$250.00,pay_0001,USD"].join("\n"),
+    )
+  })
+
+  it("leaves card last four out by default", () => {
+    const columns = parseExportColumns(null)
+    expect(columns).toEqual([...DEFAULT_EXPORT_COLUMNS])
+    expect(columns).not.toContain("last4")
+    expect(toCsv([payment], columns).split("\n")[0]).not.toContain("last4")
+    expect(toCsv([payment], columns)).not.toContain("4242")
+  })
+
+  it("returns an empty selection when nothing valid is requested", () => {
+    expect(parseExportColumns("")).toEqual([])
+    expect(parseExportColumns("bogus,DROP TABLE")).toEqual([])
+  })
+
+  it("drops unknown names and duplicates but keeps the valid ones", () => {
+    expect(parseExportColumns("id, bogus ,id,status")).toEqual(["id", "status"])
+  })
+})
+
 describe("exportFilename", () => {
   it("stamps the UTC date, so two exports on the same day collide by design", () => {
     expect(exportFilename(new Date("2026-03-14T23:00:00.000Z"))).toBe(
       "payments-2026-03-14.csv",
     )
+  })
+
+  it("names the scope when a label is given", () => {
+    expect(
+      exportFilename(new Date("2026-03-14T23:00:00.000Z"), "disputed"),
+    ).toBe("payments-disputed-2026-03-14.csv")
   })
 })

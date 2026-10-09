@@ -2,13 +2,7 @@ import { merchantById } from "@/data/merchants"
 import { Payment } from "@/data/types"
 import { formatMoney } from "./money"
 
-/**
- * CSV export for the payments table.
- *
- * The column set is fixed. Ops has asked for control over it — that is
- * NWP-101 — but today everyone gets every column, including the card
- * last four, whether or not the file is going to a merchant.
- */
+/** CSV export for the payments table. */
 
 export const EXPORT_COLUMNS = [
   "id",
@@ -24,6 +18,23 @@ export const EXPORT_COLUMNS = [
 ] as const
 
 export type ExportColumn = (typeof EXPORT_COLUMNS)[number]
+
+/** Card last four stays out unless ops opts in: these files go to merchants. */
+export const DEFAULT_EXPORT_COLUMNS: readonly ExportColumn[] =
+  EXPORT_COLUMNS.filter((column) => column !== "last4")
+
+/**
+ * Client-supplied column list → allowlisted columns in the requested order.
+ * A missing param means the defaults; unknown names are dropped, never echoed.
+ */
+export function parseExportColumns(raw: string | null): ExportColumn[] {
+  if (raw === null) return [...DEFAULT_EXPORT_COLUMNS]
+  const requested = raw.split(",").map((name) => name.trim())
+  const valid = requested.filter((name): name is ExportColumn =>
+    (EXPORT_COLUMNS as readonly string[]).includes(name),
+  )
+  return [...new Set(valid)]
+}
 
 function escapeCell(value: string): string {
   if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`
@@ -66,6 +77,8 @@ export function toCsv(
   return [header, ...rows].join("\n")
 }
 
-export function exportFilename(date = new Date()): string {
-  return `payments-${date.toISOString().slice(0, 10)}.csv`
+/** `label` must already be allowlisted (a status, "all" or "filtered"). */
+export function exportFilename(date = new Date(), label?: string): string {
+  const prefix = label ? `payments-${label}` : "payments"
+  return `${prefix}-${date.toISOString().slice(0, 10)}.csv`
 }
